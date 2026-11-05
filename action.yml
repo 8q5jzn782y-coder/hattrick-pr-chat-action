@@ -1,0 +1,14 @@
+name: Hattrick PR Chat
+description: Ask Hattrick to research a pull request through its hosted service.
+author: Hattrick
+branding:
+  icon: message-circle
+  color: gray-dark
+outputs:
+  job-id:
+    description: Durable Hattrick job identifier.
+  status:
+    description: Job status when the request was accepted.
+runs:
+  using: node24
+  main: index.mjs
