@@ -4,6 +4,25 @@ import { pathToFileURL } from "node:url"
 export const SERVICE = "https://www.hattrickai.io/api/integrations/github/pr-chat/v1"
 const statuses = new Set(["queued", "running", "partially_complete", "completed", "failed", "canceled"])
 const positive = value => { const n = Number(value); if (!Number.isSafeInteger(n) || n <= 0) throw new Error("Invalid GitHub event identity."); return n }
+const jobIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
+const rejections = Object.freeze({
+  REPOSITORY_NOT_ENABLED: "This repository is not enabled for Hattrick. Contact magic@hattrickai.io to finish setup.",
+  FORBIDDEN: "Check your repository permission and the registered workflow reference/commit with Hattrick support.",
+  UNAUTHENTICATED: "The workflow identity was rejected. Check id-token: write and your Hattrick installation.",
+  PILOT_DISABLED: "Hattrick is not accepting pilot requests. Contact support; do not create replacement reports.",
+  ALLOWANCE_OR_REQUEST_CONFLICT: "Hattrick could not reserve this request. Ask support to check allowance and request state before requesting a new report.",
+})
+
+export class ActionError extends Error {}
+
+export function jobSummary(result, event) {
+  if (result.skipped || !jobIdPattern.test(result.jobId ?? "") || !statuses.has(result.status)) return ""
+  const repository = event.repository?.full_name
+  const number = event.issue?.number
+  const pr = /^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(repository ?? "") && !repository.split("/").some(part => part === "." || part === "..") && Number.isSafeInteger(number) && number > 0
+    ? `\n\n[Follow the pull request](https://github.com/${repository}/pull/${number}).` : ""
+  return `## Hattrick\n\nRequest accepted: **${result.status.replaceAll("_", " ")}**.\n\nJob: \`${result.jobId}\`.${pr}\n\nThis is the acceptance status, not the final review. Research continues on Hattrick's service and the result appears on the PR.\n`
+}
 
 export function submission(event, env) {
   if (env.GITHUB_EVENT_NAME !== "issue_comment" || event.action !== "created" || !event.issue?.pull_request || event.comment?.user?.type === "Bot") return null
@@ -15,14 +34,15 @@ export function submission(event, env) {
 export async function submitRequest(event, env, { fetchImpl = fetch, pause = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   const body = submission(event, env)
   if (!body) return { skipped: true }
-  const identityUrl = new URL(env.ACTIONS_ID_TOKEN_REQUEST_URL)
-  if (identityUrl.protocol !== "https:" || !identityUrl.hostname.endsWith(".actions.githubusercontent.com") || identityUrl.username || identityUrl.password) throw new Error("GitHub workflow identity is unavailable.")
-  if (!env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) throw new Error("Grant id-token: write to the Hattrick job.")
+  if (!env.ACTIONS_ID_TOKEN_REQUEST_URL || !env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) throw new ActionError("Grant id-token: write to the Hattrick job.")
+  let identityUrl
+  try { identityUrl = new URL(env.ACTIONS_ID_TOKEN_REQUEST_URL) } catch { throw new ActionError("GitHub workflow identity is unavailable.") }
+  if (identityUrl.protocol !== "https:" || !identityUrl.hostname.endsWith(".actions.githubusercontent.com") || identityUrl.username || identityUrl.password) throw new ActionError("GitHub workflow identity is unavailable.")
   identityUrl.searchParams.set("audience", SERVICE)
   const identity = await fetchImpl(identityUrl, { headers: { Authorization: `Bearer ${env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` }, redirect: "error", signal: AbortSignal.timeout(15000) })
-  if (!identity.ok) throw new Error("GitHub workflow identity is unavailable.")
+  if (!identity.ok) throw new ActionError("GitHub workflow identity is unavailable.")
   const { value: token } = await identity.json()
-  if (typeof token !== "string" || !token || token.length > 17000) throw new Error("GitHub workflow identity is unavailable.")
+  if (typeof token !== "string" || !token || token.length > 17000) throw new ActionError("GitHub workflow identity is unavailable.")
   for (let attempt = 0; attempt < 3; attempt++) {
     const response = await fetchImpl(`${SERVICE}/requests`, {
       method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -31,11 +51,14 @@ export async function submitRequest(event, env, { fetchImpl = fetch, pause = ms 
     let result
     try { result = await response?.json() } catch { /* never expose server responses in runner logs */ }
     if (response?.ok) {
-      if (!/^[a-f0-9-]{36}$/.test(result?.jobId ?? "") || !statuses.has(result.status)) throw new Error("Hattrick returned an invalid status.")
+      if (!jobIdPattern.test(result?.jobId ?? "") || !statuses.has(result.status)) throw new ActionError("Hattrick returned an invalid status.")
       return { jobId: result.jobId, status: result.status }
     }
     const retryable = !response || [429, 502, 503, 504].includes(response.status) || (response.status === 409 && result?.error === "EVENT_PENDING")
-    if (!retryable || attempt === 2) throw new Error(`Hattrick request could not be accepted${response ? ` (HTTP ${response.status})` : ""}. Rerun this workflow to retrieve the same request.`)
+    if (!retryable || attempt === 2) {
+      const hint = typeof result?.error === "string" && Object.hasOwn(rejections, result.error) ? rejections[result.error] : "Rerun this workflow to retrieve the same request."
+      throw new ActionError(`Hattrick request could not be accepted${response ? ` (HTTP ${response.status})` : ""}. ${hint}`)
+    }
     await pause((attempt + 1) * 2000)
   }
 }
@@ -46,9 +69,10 @@ async function main() {
   const result = await submitRequest(event, env)
   if (result.skipped) { console.log("No Hattrick request in this comment."); return }
   if (env.GITHUB_OUTPUT) await appendFile(env.GITHUB_OUTPUT, `job-id=${result.jobId}\nstatus=${result.status}\n`)
+  if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY, jobSummary(result, event))
   console.log(`Hattrick request accepted: ${result.status}. Follow the pull request for its reply.`)
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch(() => {
-  console.error("Hattrick could not accept this request. Check the installation and workflow setup, then rerun the same workflow.")
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch(error => {
+  console.error(error instanceof ActionError ? error.message : "Hattrick could not accept this request. Check the installation and workflow setup, then rerun the same workflow.")
   process.exitCode = 1
 })

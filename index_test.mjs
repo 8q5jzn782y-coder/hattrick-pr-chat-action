@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { SERVICE, submission, submitRequest } from "./index.mjs"
+import { SERVICE, submission, submitRequest, jobSummary, ActionError } from "./index.mjs"
 
 const env = { GITHUB_EVENT_NAME: "issue_comment", GITHUB_RUN_ID: "900", GITHUB_RUN_ATTEMPT: "1",
   ACTIONS_ID_TOKEN_REQUEST_URL: "https://pipelines.actions.githubusercontent.com/idtoken?api-version=2",
@@ -71,4 +71,36 @@ test("identity credentials cannot be redirected to an arbitrary host", async () 
   for (const url of ["https://evil.test/token", "http://pipelines.actions.githubusercontent.com/token", "https://actions.githubusercontent.com.evil.test"]) {
     await assert.rejects(submitRequest(event, { ...env, ACTIONS_ID_TOKEN_REQUEST_URL: url }, { fetchImpl: () => { throw new Error("must not fetch") } }), /identity is unavailable/)
   }
+})
+
+test("missing OIDC permission fails before any network call", async () => {
+  await assert.rejects(submitRequest(event, { ...env, ACTIONS_ID_TOKEN_REQUEST_URL: undefined }, { fetchImpl: () => { throw new Error("must not fetch") } }), /id-token: write/)
+})
+
+test("setup errors use reviewed hints rather than arbitrary service text", async () => {
+  for (const [code, expected] of [["REPOSITORY_NOT_ENABLED", "not enabled"], ["FORBIDDEN", "workflow reference"], ["ALLOWANCE_OR_REQUEST_CONFLICT", "allowance"], ["PILOT_DISABLED", "not accepting"]]) {
+    let posts = 0
+    await assert.rejects(submitRequest(event, env, { fetchImpl: async url => {
+      if (String(url).includes("actions.githubusercontent.com")) return Response.json({ value: "synthetic" })
+      posts++; return Response.json({ error: code, details: "PRIVATE_DETAIL_MUST_NOT_LEAK" }, { status: 403 })
+    } }), error => error instanceof ActionError && error.message.includes(expected) && !error.message.includes("PRIVATE_DETAIL"))
+    assert.equal(posts, 1)
+  }
+})
+
+test("invalid job IDs and unrecognized statuses never reach Action outputs", async () => {
+  for (const result of [{ jobId: "-".repeat(36), status: "queued" }, { jobId, status: "<script>bad</script>" }]) {
+    await assert.rejects(submitRequest(event, env, { fetchImpl: async url => String(url).includes("actions.githubusercontent.com")
+      ? Response.json({ value: "synthetic" }) : Response.json(result) }), /invalid status/)
+  }
+})
+
+test("job summaries contain only validated identifiers and an authorized-PR destination", () => {
+  const input = { ...event, repository: { ...event.repository, full_name: "example/project" } }
+  const summary = jobSummary({ jobId, status: "queued" }, input)
+  assert.match(summary, /https:\/\/github.com\/example\/project\/pull\/3/)
+  assert.match(summary, /not the final review/)
+  assert.doesNotMatch(summary, /cancellation|synthetic|token/)
+  assert.doesNotMatch(jobSummary({ jobId, status: "queued" }, { ...input, repository: { full_name: "bad](https://evil.invalid)" } }), /evil|https:/)
+  assert.equal(jobSummary({ jobId: "invalid", status: "queued" }, input), "")
 })
