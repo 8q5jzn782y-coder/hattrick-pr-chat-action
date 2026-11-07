@@ -1,5 +1,6 @@
-# Replace the action reference with the reviewed 40-character release commit.
+# Controlled pilot only: installing this file does not enable research access.
 # The service owner must authorize this workflow and its commit before enabling it.
+# The pin below is the existing reviewed pilot commit, not a Marketplace release.
 name: Hattrick PR chat
 on:
   issue_comment:
@@ -13,8 +14,9 @@ jobs:
       (startsWith(github.event.comment.body, '/hattrick ') ||
        startsWith(github.event.comment.body, '@hattrick '))
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       id-token: write
       contents: read
     steps:
-      - uses: HATTRICK_ACTION_OWNER/hattrick-pr-chat-action@REVIEWED_RELEASE_COMMIT
+      - uses: 8q5jzn782y-coder/hattrick-pr-chat-action@bce042b3da001131c19833aecaeff54432b6204b

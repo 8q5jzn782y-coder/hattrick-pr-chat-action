@@ -1,7 +1,7 @@
 # Integration contract: v1 pre-release
 
-Implemented locally. The hosted API is disabled until its operator deploys and
-configures the service. The Action's fixed service origin is
+The hosted API is active for an operator-configured pilot, not general customer
+access. Unregistered repositories fail closed. The Action's fixed service origin is
 `https://www.hattrickai.io/api/integrations/github/pr-chat/v1`.
 
 `POST /requests` takes `repositoryId`, `pullRequest`, `commentId`, `runId`, and
