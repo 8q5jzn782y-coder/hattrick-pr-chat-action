@@ -35,7 +35,7 @@ terms and your service agreement; the MIT license does not include free research
 ## Setup
 
 1. Have Hattrick enable your team and repository, then install the
-   [Hattrick GitHub App](https://github.com/apps/hattrick-ai-repository-access)
+   [Hattrick GitHub App](https://github.com/apps/hattrick-action)
    on the selected repository. This step is operator-assisted during the pilot.
 2. Add [example-workflow.yml](example-workflow.yml) as
    `.github/workflows/hattrick.yml` on your default branch. Have Hattrick authorize
