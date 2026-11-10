@@ -1,5 +1,7 @@
 # Hattrick PR Chat Action
 
+**TRANSLATION POWER COMING SOON**
+
 Ask engineering questions about a pull request and receive a researched answer
 in GitHub, with findings, recommendations, and source links.
 
