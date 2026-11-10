@@ -56,6 +56,16 @@ Leave a top-level PR comment such as:
 /hattrick Could this change lose a queued job during shutdown?
 ```
 
+To request a response in another language, name it in your PR comment:
+
+```text
+/hattrick [language: Español] Review this change.
+```
+
+You can name a language in its own writing. Hattrick will try to write its
+explanatory prose in that language while preserving code, paths, and source
+links. Some fixed status labels may remain in English.
+
 The Action returns `job-id` and the initial `status`. Research continues on the
 service's durable queue after the workflow ends and replies on the PR. Hattrick can
 also attach up to three findings beside exact changed lines. Reply beneath one of
