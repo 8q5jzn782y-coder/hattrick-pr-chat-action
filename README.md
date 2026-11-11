@@ -7,13 +7,13 @@ Code analysis, practical recommendations, and sources—right in your GitHub PR 
 ## Get started
 
 1. From your [account page](https://www.hattrickai.io/action/account), install the Hattrick GitHub App and select your repositories.
-2. Ask a question in a PR comment:
+2. Leave a PR comment. For example:
 
 ```text
 /hattrick Could this change lose a queued job during shutdown?
 ```
 
-Or request a general review:
+Or prompt a review:
 
 ```text
 /hattrick review
